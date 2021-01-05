@@ -35,6 +35,7 @@
 #include "value_ptr.h"
 #include "visitable.h"
 
+class book_proficiency_bonuses;
 class Character;
 class JsonIn;
 class JsonObject;
@@ -173,7 +174,7 @@ iteminfo weight_to_info( const std::string &type, const std::string &left,
 
 inline bool is_crafting_component( const item &component );
 
-class item : public visitable<item>
+class item : public visitable
 {
     public:
         using FlagsSetType = std::set<flag_id>;
@@ -201,6 +202,9 @@ class item : public visitable<item>
         /** For constructing in-progress crafts */
         item( const recipe *rec, int qty, std::list<item> items, std::vector<item_comp> selections );
 
+        /** For constructing in-progress disassemblies */
+        item( const recipe *rec, item &component );
+
         // Legacy constructor for constructing from string rather than itype_id
         // TODO: remove this and migrate code using it.
         template<typename... Args>
@@ -208,7 +212,7 @@ class item : public visitable<item>
             item( itype_id( itype ), std::forward<Args>( args )... )
         {}
 
-        ~item();
+        ~item() override;
 
         /** Return a pointer-like type that's automatically invalidated if this
          * item is destroyed or assigned-to */
@@ -350,9 +354,11 @@ class item : public visitable<item>
          * @param with_prefix determines whether to include more item properties, such as
          * the extent of damage and burning (was created to sort by name without prefix
          * in additional inventory)
+         * @param with_contents determines whether to add a suffix with the full name of the contents
+         * of this item (if with_contents = false and item is not empty, "n items" will be added)
          */
         std::string tname( unsigned int quantity = 1, bool with_prefix = true,
-                           unsigned int truncate = 0 ) const;
+                           unsigned int truncate = 0, bool with_contents = true ) const;
         std::string display_money( unsigned int quantity, unsigned int total,
                                    const cata::optional<unsigned int> &selected = cata::nullopt ) const;
         /**
@@ -718,8 +724,9 @@ class item : public visitable<item>
          */
         void update_modified_pockets();
         // for pocket update stuff, which pocket is @contained in?
-        // returns a nullptr if the item is not contaiend, and prints a debug message
+        // returns a nullptr if the item is not contained, and prints a debug message
         item_pocket *contained_where( const item &contained );
+        const item_pocket *contained_where( const item &contained ) const;
         /** Whether this is a container which can be used to store liquids. */
         bool is_watertight_container() const;
         /** Whether this item has no contents at all. */
@@ -1663,10 +1670,10 @@ class item : public visitable<item>
          * item provides when worn. See @ref player::get_env_resist. Higher values are better.
          * For non-armor it returns 0.
          *
-         * @param override_base_resist Pass this to artifically increase the
+         * @param override_base_resist Pass this to artificially increase the
          * base resistance, so that the function can take care of other
          * modifications to resistance for you. Note that this parameter will
-         * never decrease base resistnace.
+         * never decrease base resistance.
          */
         int get_env_resist( int override_base_resist = 0 ) const;
         /**
@@ -1709,6 +1716,10 @@ class item : public visitable<item>
          * Book specific functions, apply to items that are books.
          */
         /*@{*/
+        /**
+         * translates the vector of proficiency bonuses into the container. returns an empty object if it's not a book
+         */
+        book_proficiency_bonuses get_book_proficiency_bonuses() const;
         /**
          * How many chapters the book has (if any). Will be 0 if the item is not a book, or if it
          * has no chapters at all.
@@ -1818,6 +1829,9 @@ class item : public visitable<item>
         const itype *ammo_data() const;
         /** Specific ammo type, returns "null" if item is neither ammo nor loaded with any */
         itype_id ammo_current() const;
+        /** Get currently loaded ammo, if any.
+         * @return item reference or null item if not loaded. */
+        const item &loaded_ammo() const;
         /** Ammo type of an ammo item
          *  @return ammotype of ammo item or a null id if the item is not ammo */
         ammotype ammo_type() const;
@@ -2106,6 +2120,7 @@ class item : public visitable<item>
         faction_id get_old_owner() const;
         bool is_owned_by( const Character &c, bool available_to_take = false ) const;
         bool is_old_owner( const Character &c, bool available_to_take = false ) const;
+        std::string get_old_owner_name() const;
         std::string get_owner_name() const;
         int get_min_str() const;
 
@@ -2181,6 +2196,12 @@ class item : public visitable<item>
          * @return The number of moves to recursively disassemble this item
          */
         int get_recursive_disassemble_moves( const Character &guy ) const;
+
+        // inherited from visitable
+        VisitResponse visit_items( const std::function<VisitResponse( item *, item * )> &func ) const
+        override;
+        std::list<item> remove_items_with( const std::function<bool( const item & )> &filter,
+                                           int count = INT_MAX ) override;
 
     private:
         /** migrates an item into this item. */

@@ -9,6 +9,7 @@
 
 #include "action.h"
 #include "activity_actor.h"
+#include "activity_actor_definitions.h"
 #include "activity_handlers.h"
 #include "avatar.h"
 #include "character.h"
@@ -1541,6 +1542,27 @@ bool vehicle::is_open( int part_index ) const
     return parts[part_index].open;
 }
 
+bool vehicle::can_close( int part_index, Character &who )
+{
+    for( auto const &vec : find_lines_of_parts( part_index, "OPENABLE" ) ) {
+        for( auto const &partID : vec ) {
+            const Creature *const mon = g->critter_at( global_part_pos3( parts[partID] ) );
+            if( mon ) {
+                if( mon->is_player() ) {
+                    who.add_msg_if_player( m_info, _( "There's some buffoon in the way!" ) );
+                } else if( mon->is_monster() ) {
+                    // TODO: Houseflies, mosquitoes, etc shouldn't count
+                    who.add_msg_if_player( m_info, _( "The %s is in the way!" ), mon->get_name() );
+                } else {
+                    who.add_msg_if_player( m_info, _( "%s is in the way!" ), mon->disp_name() );
+                }
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 void vehicle::open_all_at( int p )
 {
     std::vector<int> parts_here = parts_at_relative( parts[p].mount, true );
@@ -1942,7 +1964,7 @@ void vehicle::use_bike_rack( int part )
     if( success ) {
         map &here = get_map();
         here.invalidate_map_cache( here.get_abs_sub().z );
-        here.reset_vehicle_cache( here.get_abs_sub().z );
+        here.rebuild_vehicle_level_caches();
     }
 }
 
@@ -2225,9 +2247,10 @@ void vehicle::interact_with( const vpart_position &vp )
             item::reload_option opt = player_character.select_ammo( *turret.base(), true );
             std::vector<item_location> targets;
             if( opt ) {
+                const int moves = opt.moves();
                 targets.emplace_back( turret.base() );
                 targets.push_back( std::move( opt.ammo ) );
-                player_character.assign_activity( player_activity( reload_activity_actor( opt.moves(), opt.qty(),
+                player_character.assign_activity( player_activity( reload_activity_actor( moves, opt.qty(),
                                                   targets ) ) );
             }
             return;
